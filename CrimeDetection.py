@@ -10,13 +10,18 @@ import smtplib
 import matplotlib.pyplot as plt  # Import Matplotlib
 from io import BytesIO
 import base64
+from playsound import playsound
+
 
 app = Flask(__name__)
 
 # Load the model and labels
 model = load_model("keras_Model.h5", compile=False)
 class_names = open("labels.txt", "r").readlines()
-
+def play_alarm_sound():
+    """Plays an alarm sound."""
+    playsound('alarm.mp3') 
+    
 def preprocess_image(image):
     # Resize the image to (224, 224) as required by the model
     image = cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA)
@@ -93,6 +98,7 @@ def predict():
             return render_template('index.html', message='No file selected')
 
         if file_type == 'image':
+            # Image processing logic
             image = cv2.imdecode(np.fromstring(file.read(), np.uint8), cv2.IMREAD_COLOR)
             image = preprocess_image(image)
             prediction = model.predict(image)
@@ -110,11 +116,54 @@ def predict():
             
             return render_template('index.html', class_name=class_name[2:], confidence_score=f"{confidence_score:.2f}%",
                                    scatter_plot_img=scatter_plot_img, bar_chart_img=bar_chart_img, pie_chart_img=pie_chart_img)
+        
         elif file_type == 'video':
-            # Implement video processing logic here if needed
-            return render_template('index.html', message='Video processing not implemented yet')
+            # Save the video file to disk
+            video_path = "uploaded_video.mp4"  # You can customize the filename and extension
+            file.save(video_path)
+
+            # Video processing logic
+            video = cv2.VideoCapture(video_path)
+            frames = []
+            while True:
+                ret, frame = video.read()
+                if not ret:
+                    break
+                # Preprocess the frame
+                frame = cv2.resize(frame, (224, 224), interpolation=cv2.INTER_AREA)
+                frame = np.asarray(frame, dtype=np.float32).reshape(1, 224, 224, 3)
+                frame = (frame / 127.5) - 1  # Normalize the frame
+                frames.append(frame)
+            
+            video.release()
+            
+            # Concatenate frames along the batch dimension
+            video_data = np.concatenate(frames, axis=0)
+            
+            # Predictions for each frame
+            predictions = model.predict(video_data)
+            
+            # Aggregate predictions over all frames
+            avg_prediction = np.mean(predictions, axis=0)
+            index = np.argmax(avg_prediction)
+            class_name = class_names[index]
+            confidence_score = avg_prediction[index] * 100
+            
+            # Example email sending
+            subject = f"Prediction Result: {class_name[2:]}"
+            message = f"The model predicted {class_name[2:]} with {confidence_score:.2f}% confidence."
+            # send_email('sender@example.com', ['poloce@example.com'], subject, message)
+            
+            # Generate graphs based on confidence score
+            scatter_plot_img, bar_chart_img, pie_chart_img = generate_graphs(confidence_score)
+            
+            return render_template('index.html', class_name=class_name[2:], confidence_score=f"{confidence_score:.2f}%",
+                                scatter_plot_img=scatter_plot_img, bar_chart_img=bar_chart_img, pie_chart_img=pie_chart_img)
+
+
         else:
             return render_template('index.html', message='Invalid file type selected')
+
 
 if __name__ == '__main__':
     app.run(debug=True)
